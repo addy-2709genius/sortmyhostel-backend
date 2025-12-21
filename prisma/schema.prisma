@@ -1,0 +1,89 @@
+// Prisma Schema for MongoDB
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  userId    String   @unique // Anonymous user ID from frontend
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("users")
+}
+
+model MenuItem {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  name      String
+  day       String   // monday, tuesday, etc.
+  meal      String   // breakfast, lunch, snacks, dinner
+  date      DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  feedbacks Feedback[]
+  comments  Comment[]
+  
+  @@index([day, meal])
+  @@index([name])
+  @@map("menuitems")
+}
+
+model Feedback {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  type       String   // 'like' or 'dislike'
+  menuItemId String   @db.ObjectId
+  userId     String   // Anonymous user ID
+  createdAt  DateTime @default(now())
+  
+  menuItem   MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  
+  @@unique([menuItemId, userId, type]) // One vote per user per item
+  @@index([menuItemId])
+  @@index([userId])
+  @@map("feedbacks")
+}
+
+model Comment {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  text       String
+  menuItemId String   @db.ObjectId
+  userId     String   // Anonymous user ID
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  
+  menuItem   MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  
+  @@index([menuItemId])
+  @@index([userId])
+  @@map("comments")
+}
+
+model FoodWastage {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  date      DateTime @unique
+  cooked    Float    // in kg
+  wasted    Float    // in kg
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("foodwastage")
+}
+
+model Admin {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  email     String   @unique
+  password  String   // Hashed password
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("admins")
+}
+
+// Note: Vote model removed - using Feedback model instead
+
