@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: sortmyhostel-backend
+    env: node
+    plan: free
+    buildCommand: npm install && npm run prisma:generate
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: DATABASE_URL
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+
