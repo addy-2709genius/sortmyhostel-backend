@@ -85,5 +85,16 @@ model Admin {
   @@map("admins")
 }
 
+model Student {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  email     String   @unique
+  password  String   // Hashed password
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@map("students")
+}
+
 // Note: Vote model removed - using Feedback model instead
 

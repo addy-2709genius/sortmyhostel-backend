@@ -96,6 +96,52 @@ export const deleteComment = async (req, res, next) => {
   }
 };
 
+// Get all comments (for community feedback section)
+export const getAllComments = async (req, res, next) => {
+  try {
+    const comments = await prisma.comment.findMany({
+      include: {
+        menuItem: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const allComments = await Promise.all(
+      comments.map(async (comment) => {
+        const likes = await prisma.feedback.count({
+          where: {
+            menuItemId: comment.menuItemId,
+            type: 'like',
+          },
+        });
+        const dislikes = await prisma.feedback.count({
+          where: {
+            menuItemId: comment.menuItemId,
+            type: 'dislike',
+          },
+        });
+
+        return {
+          id: comment.id,
+          text: comment.text,
+          timestamp: comment.createdAt.toISOString(),
+          foodName: comment.menuItem.name,
+          foodId: comment.menuItemId,
+          day: comment.menuItem.day,
+          meal: comment.menuItem.meal,
+          date: comment.menuItem.date,
+          likes,
+          dislikes,
+        };
+      })
+    );
+
+    res.json({ data: allComments });
+  } catch (error) {
+    next(error);
+  }
+};
+
 // Get disliked food issues
 export const getDislikedFoodIssues = async (req, res, next) => {
   try {

@@ -6,6 +6,7 @@ import rateLimit from 'express-rate-limit';
 import prisma from './config/database.js';
 
 // Import routes
+import authRoutes from './routes/authRoutes.js';
 import menuRoutes from './routes/menuRoutes.js';
 import feedbackRoutes from './routes/feedbackRoutes.js';
 import analyticsRoutes from './routes/analyticsRoutes.js';
@@ -37,6 +38,7 @@ const limiter = rateLimit({
 app.use('/api/', limiter);
 
 // Routes
+app.use('/api/auth', authRoutes);
 app.use('/api/menu', menuRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/analytics', analyticsRoutes);

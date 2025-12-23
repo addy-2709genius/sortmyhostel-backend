@@ -3,6 +3,7 @@ import {
   submitFeedback,
   submitComment,
   deleteComment,
+  getAllComments,
   getDislikedFoodIssues,
 } from '../controllers/feedbackController.js';
 import { validateFeedback, validateComment, handleValidationErrors } from '../utils/validators.js';
@@ -13,6 +14,7 @@ const router = express.Router();
 router.post('/submit', validateFeedback, handleValidationErrors, submitFeedback);
 router.post('/comment', validateComment, handleValidationErrors, submitComment);
 router.delete('/comment/:commentId', authenticateAdmin, deleteComment);
+router.get('/all-comments', getAllComments);
 router.get('/disliked-issues', getDislikedFoodIssues);
 
 export default router;
