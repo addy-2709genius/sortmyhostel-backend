@@ -108,17 +108,28 @@ export const updateMenuFromExcel = async (req, res, next) => {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    const menuData = await parseExcelMenu(req.file.buffer);
+    const parseResult = await parseExcelMenu(req.file.buffer);
+    const { menuData, errors, warnings, stats } = parseResult;
+
+    // If there are critical errors (no data), return error
+    if (errors.length > 0 && stats.totalItems === 0) {
+      return res.status(400).json({
+        success: false,
+        error: errors.join(' '),
+        warnings,
+        stats,
+      });
+    }
 
     // Transaction to update all menu items
     await prisma.$transaction(async (tx) => {
       // Delete existing menu items
       await tx.menuItem.deleteMany({});
 
-      // Create new menu items
+      // Create new menu items (even if some days are missing)
       for (const [day, dayData] of Object.entries(menuData)) {
         for (const [meal, items] of Object.entries(dayData)) {
-          if (meal !== 'date' && Array.isArray(items)) {
+          if (meal !== 'date' && Array.isArray(items) && items.length > 0) {
             await tx.menuItem.createMany({
               data: items.map(item => ({
                 name: item.name,
@@ -132,7 +143,21 @@ export const updateMenuFromExcel = async (req, res, next) => {
       }
     });
 
-    res.json({ success: true, message: 'Menu updated successfully' });
+    // Build success message with warnings
+    let message = 'Menu updated successfully!';
+    if (warnings.length > 0) {
+      message += ` Warnings: ${warnings.join('; ')}`;
+    }
+    if (stats.daysMissing > 0) {
+      message += ` Note: ${stats.daysMissing} day(s) missing from file.`;
+    }
+
+    res.json({
+      success: true,
+      message,
+      warnings: warnings.length > 0 ? warnings : undefined,
+      stats,
+    });
   } catch (error) {
     next(error);
   }
