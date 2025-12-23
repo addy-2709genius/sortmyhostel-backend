@@ -23,28 +23,54 @@ export const parseExcelMenu = async (fileBuffer) => {
     let headerRow = null;
     let dateRow = null;
     
-    // Search for header row (contains day names)
-    for (let rowIdx = 0; rowIdx < Math.min(5, jsonData.length); rowIdx++) {
+    // Search for header row (contains day names) - check first 10 rows
+    for (let rowIdx = 0; rowIdx < Math.min(10, jsonData.length); rowIdx++) {
       const row = jsonData[rowIdx];
-      if (!row) continue;
+      if (!row || row.length === 0) continue;
       
-      // Check if this row contains day names
-      const rowText = row.map(cell => String(cell || '').toLowerCase()).join(' ');
-      if (rowText.includes('monday') || rowText.includes('tuesday') || rowText.includes('wednesday')) {
+      // Check if this row contains day names in any column
+      let dayCount = 0;
+      for (let colIdx = 0; colIdx < row.length; colIdx++) {
+        const cellValue = String(row[colIdx] || '').trim().toLowerCase();
+        if (cellValue.includes('monday') || cellValue.includes('tuesday') || 
+            cellValue.includes('wednesday') || cellValue.includes('thursday') ||
+            cellValue.includes('friday') || cellValue.includes('saturday') || 
+            cellValue.includes('sunday')) {
+          dayCount++;
+        }
+      }
+      
+      // If we found at least 3 day names, this is likely the header row
+      if (dayCount >= 3) {
         headerRowIndex = rowIdx;
         headerRow = row;
-        // Date row is usually the next row
+        // Date row is usually the next row (check if it has dates)
         if (rowIdx + 1 < jsonData.length) {
-          dateRowIndex = rowIdx + 1;
-          dateRow = jsonData[rowIdx + 1];
+          const nextRow = jsonData[rowIdx + 1];
+          // Check if next row has date-like values
+          let hasDates = false;
+          for (let colIdx = 0; colIdx < nextRow.length; colIdx++) {
+            const cellValue = String(nextRow[colIdx] || '').trim();
+            // Check for date patterns: DD/MM/YY, DD/MM/YYYY, or numbers
+            if (cellValue.match(/\d{1,2}\/\d{1,2}\/\d{2,4}/) || 
+                (typeof nextRow[colIdx] === 'number' && nextRow[colIdx] > 40000)) {
+              hasDates = true;
+              break;
+            }
+          }
+          if (hasDates) {
+            dateRowIndex = rowIdx + 1;
+            dateRow = nextRow;
+          }
         }
         break;
       }
     }
     
     if (headerRowIndex === -1 || !headerRow) {
-      errors.push('Could not find day headers (Monday, Tuesday, etc.) in the Excel file. Please ensure the file has day names in the header row.');
-      throw new Error('Day headers not found');
+      const errorMsg = 'Could not find day headers (Monday, Tuesday, etc.) in the Excel file. Please ensure the file has day names in a header row.';
+      errors.push(errorMsg);
+      throw new Error(errorMsg);
     }
     
     // Expected days
