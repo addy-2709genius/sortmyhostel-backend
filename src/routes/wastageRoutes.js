@@ -16,3 +16,4 @@ router.post('/submit', authenticateAdmin, validateWastage, handleValidationError
 export default router;
 
 
+
