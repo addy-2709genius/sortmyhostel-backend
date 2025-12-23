@@ -17,19 +17,45 @@ export const parseExcelMenu = async (fileBuffer) => {
       throw new Error('Invalid Excel format: Not enough rows');
     }
     
-    // Get day headers (skip first column which is category)
-    const headerRow = jsonData[0];
-    const dateRow = jsonData[1];
+    // Find the header row (look for row with day names)
+    let headerRowIndex = -1;
+    let dateRowIndex = -1;
+    let headerRow = null;
+    let dateRow = null;
+    
+    // Search for header row (contains day names)
+    for (let rowIdx = 0; rowIdx < Math.min(5, jsonData.length); rowIdx++) {
+      const row = jsonData[rowIdx];
+      if (!row) continue;
+      
+      // Check if this row contains day names
+      const rowText = row.map(cell => String(cell || '').toLowerCase()).join(' ');
+      if (rowText.includes('monday') || rowText.includes('tuesday') || rowText.includes('wednesday')) {
+        headerRowIndex = rowIdx;
+        headerRow = row;
+        // Date row is usually the next row
+        if (rowIdx + 1 < jsonData.length) {
+          dateRowIndex = rowIdx + 1;
+          dateRow = jsonData[rowIdx + 1];
+        }
+        break;
+      }
+    }
+    
+    if (headerRowIndex === -1 || !headerRow) {
+      errors.push('Could not find day headers (Monday, Tuesday, etc.) in the Excel file. Please ensure the file has day names in the header row.');
+      throw new Error('Day headers not found');
+    }
     
     // Expected days
     const expectedDays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
     const foundDays = new Set();
     
-    // Find day columns (skip first column)
+    // Find day columns (skip first column which is usually category)
     const dayColumns = {};
     for (let i = 1; i < headerRow.length; i++) {
       const dayHeader = String(headerRow[i] || '').trim().toLowerCase();
-      const dateValue = String(dateRow[i] || '').trim();
+      const dateValue = dateRow ? String(dateRow[i] || '').trim() : '';
       
       if (dayHeader && (dayHeader.includes('monday') || dayHeader.includes('tuesday') || 
           dayHeader.includes('wednesday') || dayHeader.includes('thursday') || 
@@ -77,7 +103,7 @@ export const parseExcelMenu = async (fileBuffer) => {
       }
     });
     
-    // Parse meal items
+    // Parse meal items (start from after the date row)
     let currentMeal = null;
     let mealCounts = {
       breakfast: 0,
@@ -86,7 +112,8 @@ export const parseExcelMenu = async (fileBuffer) => {
       dinner: 0,
     };
     
-    for (let rowIndex = 2; rowIndex < jsonData.length; rowIndex++) {
+    const startRowIndex = Math.max(headerRowIndex + 2, 2); // Start after header and date rows
+    for (let rowIndex = startRowIndex; rowIndex < jsonData.length; rowIndex++) {
       const row = jsonData[rowIndex];
       if (!row || row.length === 0) continue;
       

@@ -108,16 +108,33 @@ export const updateMenuFromExcel = async (req, res, next) => {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    const parseResult = await parseExcelMenu(req.file.buffer);
+    let parseResult;
+    try {
+      parseResult = await parseExcelMenu(req.file.buffer);
+    } catch (parseError) {
+      return res.status(400).json({
+        success: false,
+        error: parseError.message || 'Failed to parse Excel file. Please check the file format.',
+      });
+    }
+    
     const { menuData, errors, warnings, stats } = parseResult;
 
     // If there are critical errors (no data), return error
-    if (errors.length > 0 && stats.totalItems === 0) {
+    if (errors.length > 0 && stats && stats.totalItems === 0) {
       return res.status(400).json({
         success: false,
         error: errors.join(' '),
-        warnings,
-        stats,
+        warnings: warnings || [],
+        stats: stats || {},
+      });
+    }
+    
+    // Validate menuData exists
+    if (!menuData || typeof menuData !== 'object') {
+      return res.status(400).json({
+        success: false,
+        error: 'Failed to parse menu data from Excel file. Please check the file format.',
       });
     }
 
