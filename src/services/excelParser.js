@@ -1,9 +1,5 @@
 import * as XLSX from 'xlsx';
 
-/**
- * AI-Powered Excel Menu Parser
- * Intelligently analyzes Excel structure and extracts menu data
- */
 export const parseExcelMenu = async (fileBuffer) => {
   const errors = [];
   const warnings = [];
@@ -14,43 +10,91 @@ export const parseExcelMenu = async (fileBuffer) => {
     const sheetName = workbook.SheetNames[0];
     const worksheet = workbook.Sheets[sheetName];
     
-    // Convert to JSON with all data
+    // Convert to JSON with header row
     const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
     
     if (jsonData.length < 2) {
       throw new Error('Invalid Excel format: Not enough rows');
     }
     
-    // AI Analysis: Analyze the entire sheet structure
-    const analysis = analyzeSheetStructure(jsonData);
+    // Find the header row (look for row with day names)
+    let headerRowIndex = -1;
+    let dateRowIndex = -1;
+    let headerRow = null;
+    let dateRow = null;
     
-    if (!analysis.headerRow || analysis.headerRow < 0) {
-      const errorMsg = 'Could not find day headers in the Excel file. Please ensure the file contains day names (Monday, Tuesday, etc.).';
+    // Search for header row (contains day names) - check first 10 rows
+    for (let rowIdx = 0; rowIdx < Math.min(10, jsonData.length); rowIdx++) {
+      const row = jsonData[rowIdx];
+      if (!row || row.length === 0) continue;
+      
+      // Check if this row contains day names in any column
+      let dayCount = 0;
+      for (let colIdx = 0; colIdx < row.length; colIdx++) {
+        const cellValue = String(row[colIdx] || '').trim().toLowerCase();
+        if (cellValue.includes('monday') || cellValue.includes('tuesday') || 
+            cellValue.includes('wednesday') || cellValue.includes('thursday') ||
+            cellValue.includes('friday') || cellValue.includes('saturday') || 
+            cellValue.includes('sunday')) {
+          dayCount++;
+        }
+      }
+      
+      // If we found at least 3 day names, this is likely the header row
+      if (dayCount >= 3) {
+        headerRowIndex = rowIdx;
+        headerRow = row;
+        // Date row is usually the next row (check if it has dates)
+        if (rowIdx + 1 < jsonData.length) {
+          const nextRow = jsonData[rowIdx + 1];
+          // Check if next row has date-like values
+          let hasDates = false;
+          for (let colIdx = 0; colIdx < nextRow.length; colIdx++) {
+            const cellValue = String(nextRow[colIdx] || '').trim();
+            // Check for date patterns: DD/MM/YY, DD/MM/YYYY, or numbers
+            if (cellValue.match(/\d{1,2}\/\d{1,2}\/\d{2,4}/) || 
+                (typeof nextRow[colIdx] === 'number' && nextRow[colIdx] > 40000)) {
+              hasDates = true;
+              break;
+            }
+          }
+          if (hasDates) {
+            dateRowIndex = rowIdx + 1;
+            dateRow = nextRow;
+          }
+        }
+        break;
+      }
+    }
+    
+    if (headerRowIndex === -1 || !headerRow) {
+      const errorMsg = 'Could not find day headers (Monday, Tuesday, etc.) in the Excel file. Please ensure the file has day names in a header row.';
       errors.push(errorMsg);
       throw new Error(errorMsg);
     }
-    
-    const headerRow = jsonData[analysis.headerRow];
-    const dateRow = analysis.dateRow >= 0 ? jsonData[analysis.dateRow] : null;
     
     // Expected days
     const expectedDays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
     const foundDays = new Set();
     
-    // Find day columns intelligently
+    // Find day columns (skip first column which is usually category)
     const dayColumns = {};
-    for (let i = 0; i < headerRow.length; i++) {
-      const cellValue = String(headerRow[i] || '').trim();
-      const dayKey = extractDayFromText(cellValue);
+    for (let i = 1; i < headerRow.length; i++) {
+      const dayHeader = String(headerRow[i] || '').trim().toLowerCase();
+      const dateValue = dateRow ? String(dateRow[i] || '').trim() : '';
       
-      if (dayKey) {
-        const dateValue = dateRow && dateRow[i] ? String(dateRow[i]).trim() : '';
-        dayColumns[i] = {
-          key: dayKey,
-          date: extractDate(dateValue) || extractDateFromHeader(cellValue),
-          columnIndex: i,
-        };
-        foundDays.add(dayKey);
+      if (dayHeader && (dayHeader.includes('monday') || dayHeader.includes('tuesday') || 
+          dayHeader.includes('wednesday') || dayHeader.includes('thursday') || 
+          dayHeader.includes('friday') || dayHeader.includes('saturday') || 
+          dayHeader.includes('sunday'))) {
+        const dayKey = getDayKey(dayHeader);
+        if (dayKey) {
+          dayColumns[i] = {
+            key: dayKey,
+            date: extractDate(dateValue) || dateValue,
+          };
+          foundDays.add(dayKey);
+        }
       }
     }
     
@@ -62,11 +106,11 @@ export const parseExcelMenu = async (fileBuffer) => {
     
     // Check if no days found at all
     if (Object.keys(dayColumns).length === 0) {
-      errors.push('No valid day columns found. Please ensure your Excel file has day headers (Monday, Tuesday, etc.).');
+      errors.push('No valid day columns found. Please ensure your Excel file has day headers (Monday, Tuesday, etc.) in the first row.');
       throw new Error('No valid day columns found');
     }
     
-    // Initialize day menus for all expected days
+    // Initialize day menus for all expected days (even if missing in file)
     const menuData = {};
     expectedDays.forEach(day => {
       menuData[day] = {
@@ -85,26 +129,98 @@ export const parseExcelMenu = async (fileBuffer) => {
       }
     });
     
-    // AI-Powered meal detection and item extraction
-    const mealSections = detectMealSections(jsonData, analysis.headerRow);
+    // Parse meal items (start from after the date row)
+    let currentMeal = null;
+    let mealCounts = {
+      breakfast: 0,
+      lunch: 0,
+      snacks: 0,
+      dinner: 0,
+    };
     
-    // Extract menu items for each meal section
-    Object.entries(mealSections).forEach(([mealType, section]) => {
-      extractMenuItems(jsonData, section, dayColumns, menuData, mealType);
+    const startRowIndex = Math.max(headerRowIndex + 2, 2); // Start after header and date rows
+    for (let rowIndex = startRowIndex; rowIndex < jsonData.length; rowIndex++) {
+      const row = jsonData[rowIndex];
+      if (!row || row.length === 0) continue;
+      
+      const category = String(row[0] || '').trim().toLowerCase();
+      
+      // Detect meal category
+      if (category.includes('breakfast')) {
+        currentMeal = 'breakfast';
+        continue;
+      } else if (category.includes('lunch')) {
+        currentMeal = 'lunch';
+        continue;
+      } else if (category.includes('snack')) {
+        currentMeal = 'snacks';
+        continue;
+      } else if (category.includes('dinner')) {
+        currentMeal = 'dinner';
+        continue;
+      }
+      
+      // Skip empty rows or non-meal rows
+      if (!currentMeal || !category) continue;
+      
+      // Parse food items for each day
+      Object.entries(dayColumns).forEach(([colIndex, { key }]) => {
+        const foodName = String(row[parseInt(colIndex)] || '').trim();
+        
+        if (foodName && foodName.length > 0 && !foodName.includes('***') && !foodName.includes('****')) {
+          // Clean up food name (remove extra spaces, special characters)
+          const cleanName = foodName.replace(/\s+/g, ' ').trim();
+          
+          if (cleanName.length > 0) {
+            // Check if item already exists (by name)
+            const existingItem = menuData[key][currentMeal].find(
+              item => item.name.toLowerCase() === cleanName.toLowerCase()
+            );
+            
+            if (!existingItem) {
+              menuData[key][currentMeal].push({
+                name: cleanName,
+              });
+              mealCounts[currentMeal]++;
+            }
+          }
+        }
+      });
+    }
+    
+    // Check for empty meals
+    Object.entries(menuData).forEach(([day, dayData]) => {
+      Object.entries(dayData).forEach(([meal, items]) => {
+        if (meal !== 'date' && Array.isArray(items) && items.length === 0) {
+          // Only warn if the day was found in the file
+          if (foundDays.has(day)) {
+            warnings.push(`${day.charAt(0).toUpperCase() + day.slice(1)} ${meal} has no items.`);
+          }
+        }
+      });
     });
     
-    // Validate and clean extracted data
-    const stats = validateAndCleanMenu(menuData, foundDays, warnings);
+    // Summary statistics
+    const totalItems = Object.values(menuData).reduce((sum, dayData) => {
+      return sum + Object.values(dayData).reduce((mealSum, meal) => {
+        return mealSum + (Array.isArray(meal) ? meal.length : 0);
+      }, 0);
+    }, 0);
     
-    if (stats.totalItems === 0) {
-      errors.push('No menu items found in the Excel file. Please check the file format and ensure food items are listed.');
+    if (totalItems === 0) {
+      errors.push('No menu items found in the Excel file. Please check the file format.');
     }
     
     return {
       menuData,
       errors,
       warnings,
-      stats,
+      stats: {
+        daysFound: foundDays.size,
+        daysMissing: missingDays.length,
+        totalItems,
+        mealCounts,
+      },
     };
   } catch (error) {
     errors.push(`Failed to parse Excel file: ${error.message}`);
@@ -123,277 +239,42 @@ export const parseExcelMenu = async (fileBuffer) => {
 };
 
 /**
- * AI Analysis: Analyze sheet structure to find headers, dates, and meal sections
+ * Convert day name to key format
  */
-function analyzeSheetStructure(jsonData) {
-  const analysis = {
-    headerRow: -1,
-    dateRow: -1,
-    mealRows: [],
-  };
-  
-  // Search for header row (contains day names)
-  for (let rowIdx = 0; rowIdx < Math.min(15, jsonData.length); rowIdx++) {
-    const row = jsonData[rowIdx];
-    if (!row || row.length === 0) continue;
-    
-    // Count how many day names are in this row
-    let dayCount = 0;
-    for (let colIdx = 0; colIdx < row.length; colIdx++) {
-      const cellValue = String(row[colIdx] || '').trim().toLowerCase();
-      if (extractDayFromText(cellValue)) {
-        dayCount++;
-      }
-    }
-    
-    // If we found 3+ day names, this is likely the header row
-    if (dayCount >= 3 && analysis.headerRow === -1) {
-      analysis.headerRow = rowIdx;
-      
-      // Check next row for dates
-      if (rowIdx + 1 < jsonData.length) {
-        const nextRow = jsonData[rowIdx + 1];
-        let dateCount = 0;
-        for (let colIdx = 0; colIdx < nextRow.length; colIdx++) {
-          const cellValue = String(nextRow[colIdx] || '').trim();
-          // Check for date patterns
-          if (cellValue.match(/\d{1,2}\/\d{1,2}\/\d{2,4}/) || 
-              (typeof nextRow[colIdx] === 'number' && nextRow[colIdx] > 40000)) {
-            dateCount++;
-          }
-        }
-        if (dateCount >= 2) {
-          analysis.dateRow = rowIdx + 1;
-        }
-      }
-      break;
-    }
-  }
-  
-  return analysis;
-}
-
-/**
- * AI-Powered: Detect meal sections in the Excel
- */
-function detectMealSections(jsonData, startRow) {
-  const mealSections = {
-    breakfast: { startRow: -1, endRow: -1 },
-    lunch: { startRow: -1, endRow: -1 },
-    snacks: { startRow: -1, endRow: -1 },
-    dinner: { startRow: -1, endRow: -1 },
-  };
-  
-  const mealKeywords = {
-    breakfast: ['breakfast', 'bf', 'morning'],
-    lunch: ['lunch', 'afternoon'],
-    snacks: ['snack', 'evening', 'tea time'],
-    dinner: ['dinner', 'night', 'supper'],
-  };
-  
-  let currentMeal = null;
-  let currentStartRow = -1;
-  
-  for (let rowIdx = startRow + 2; rowIdx < jsonData.length; rowIdx++) {
-    const row = jsonData[rowIdx];
-    if (!row || row.length === 0) continue;
-    
-    const firstCell = String(row[0] || '').trim().toLowerCase();
-    
-    // Check if this row starts a new meal section
-    for (const [mealType, keywords] of Object.entries(mealKeywords)) {
-      if (keywords.some(keyword => firstCell.includes(keyword))) {
-        // End previous meal section
-        if (currentMeal && currentStartRow >= 0) {
-          mealSections[currentMeal].endRow = rowIdx - 1;
-        }
-        // Start new meal section
-        currentMeal = mealType;
-        mealSections[mealType].startRow = rowIdx;
-        currentStartRow = rowIdx;
-        break;
-      }
-    }
-  }
-  
-  // Set end row for last meal
-  if (currentMeal && currentStartRow >= 0) {
-    mealSections[currentMeal].endRow = jsonData.length - 1;
-  }
-  
-  return mealSections;
-}
-
-/**
- * AI-Powered: Extract menu items from a meal section
- */
-function extractMenuItems(jsonData, section, dayColumns, menuData, mealType) {
-  if (section.startRow < 0) return;
-  
-  const startRow = section.startRow + 1; // Skip meal header row
-  const endRow = section.endRow >= 0 ? section.endRow : jsonData.length;
-  
-  for (let rowIdx = startRow; rowIdx < endRow; rowIdx++) {
-    const row = jsonData[rowIdx];
-    if (!row || row.length === 0) continue;
-    
-    const firstCell = String(row[0] || '').trim().toLowerCase();
-    
-    // Skip if this is another meal header
-    if (firstCell.includes('breakfast') || firstCell.includes('lunch') || 
-        firstCell.includes('snack') || firstCell.includes('dinner')) {
-      continue;
-    }
-    
-    // Skip category headers (HOT FOOD, DAL, VEG, etc.)
-    if (isCategoryHeader(firstCell)) {
-      continue;
-    }
-    
-    // Extract food items for each day column
-    Object.entries(dayColumns).forEach(([colIndex, { key }]) => {
-      const foodName = extractFoodName(row[parseInt(colIndex)]);
-      
-      if (foodName && foodName.length > 0) {
-        // Check if item already exists
-        const existingItem = menuData[key][mealType].find(
-          item => item.name.toLowerCase() === foodName.toLowerCase()
-        );
-        
-        if (!existingItem) {
-          menuData[key][mealType].push({
-            name: foodName,
-          });
-        }
-      }
-    });
-  }
-}
-
-/**
- * AI-Powered: Extract and clean food name from cell
- */
-function extractFoodName(cellValue) {
-  if (!cellValue) return '';
-  
-  let foodName = String(cellValue).trim();
-  
-  // Remove common non-food indicators
-  const skipPatterns = [
-    /^\*+$/,  // Only asterisks
-    /^pickle$/i,
-    /^curd$/i,
-    /^milk$/i,
-    /^tea$/i,
-    /^coffee$/i,
-    /^water$/i,
-    /^salad$/i,
-    /^papad$/i,
-    /^fryums$/i,
-    /^sauces$/i,
-    /^chutney$/i,
-    /^onion$/i,
-    /^lemon$/i,
-    /^techha$/i,
-    /^dessert/i,
-    /^non-veg/i,
-    /^non veg/i,
-  ];
-  
-  // Skip if matches skip patterns
-  if (skipPatterns.some(pattern => pattern.test(foodName))) {
-    return '';
-  }
-  
-  // Clean up food name
-  foodName = foodName
-    .replace(/\s+/g, ' ')  // Multiple spaces to single
-    .replace(/^\s+|\s+$/g, '')  // Trim
-    .replace(/^[\/\-\*]+|[\/\-\*]+$/g, '')  // Remove leading/trailing special chars
-    .trim();
-  
-  // Skip if too short or empty
-  if (foodName.length < 2) return '';
-  
-  // Skip if it's just numbers or special characters
-  if (/^[\d\s\-\*\/]+$/.test(foodName)) return '';
-  
-  return foodName;
-}
-
-/**
- * Check if a cell value is a category header
- */
-function isCategoryHeader(cellValue) {
-  const categoryHeaders = [
-    'hot food', 'dal', 'veg', 'rice', 'roti', 'salad', 'pickle',
-    'beverages', 'fruits', 'cereals', 'dessert', 'non-veg', 'curd',
-    'milk', 'refreshment', 'chutney', 'sauces', 'fryums', 'papad',
-  ];
-  
-  return categoryHeaders.some(header => cellValue.includes(header));
-}
-
-/**
- * Extract day name from text (handles formats like "Monday 15/12/25")
- */
-function extractDayFromText(text) {
-  if (!text) return null;
-  
-  const lowerText = text.toLowerCase();
-  
-  if (lowerText.includes('monday')) return 'monday';
-  if (lowerText.includes('tuesday')) return 'tuesday';
-  if (lowerText.includes('wednesday')) return 'wednesday';
-  if (lowerText.includes('thursday')) return 'thursday';
-  if (lowerText.includes('friday')) return 'friday';
-  if (lowerText.includes('saturday')) return 'saturday';
-  if (lowerText.includes('sunday')) return 'sunday';
-  
+const getDayKey = (dayName) => {
+  const day = dayName.toLowerCase();
+  if (day.includes('monday')) return 'monday';
+  if (day.includes('tuesday')) return 'tuesday';
+  if (day.includes('wednesday')) return 'wednesday';
+  if (day.includes('thursday')) return 'thursday';
+  if (day.includes('friday')) return 'friday';
+  if (day.includes('saturday')) return 'saturday';
+  if (day.includes('sunday')) return 'sunday';
   return null;
-}
-
-/**
- * Extract date from header text (e.g., "Monday 15/12/25")
- */
-function extractDateFromHeader(headerText) {
-  if (!headerText) return '';
-  
-  // Look for date pattern in header
-  const dateMatch = headerText.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
-  if (dateMatch) {
-    const day = parseInt(dateMatch[1]);
-    const month = parseInt(dateMatch[2]) - 1;
-    let year = parseInt(dateMatch[3]);
-    if (year < 100) year = 2000 + year;
-    const date = new Date(year, month, day);
-    if (!isNaN(date.getTime())) {
-      return date.toISOString().split('T')[0];
-    }
-  }
-  
-  return '';
-}
+};
 
 /**
  * Extract date from Excel date value
  */
-function extractDate(dateValue) {
+const extractDate = (dateValue) => {
   if (!dateValue) return '';
   
-  // If it's already a date string in YYYY-MM-DD format
+  // If it's already a date string in YYYY-MM-DD format, return it
   if (typeof dateValue === 'string' && dateValue.match(/\d{4}-\d{2}-\d{2}/)) {
     return dateValue;
   }
   
   // Try to parse date formats like "15/12/25" or "15/12/2025"
   if (typeof dateValue === 'string') {
+    // Match DD/MM/YY or DD/MM/YYYY
     const dateMatch = dateValue.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/);
     if (dateMatch) {
       const day = parseInt(dateMatch[1]);
-      const month = parseInt(dateMatch[2]) - 1;
+      const month = parseInt(dateMatch[2]) - 1; // Month is 0-indexed
       let year = parseInt(dateMatch[3]);
-      if (year < 100) year = 2000 + year;
+      if (year < 100) {
+        year = 2000 + year; // Convert 2-digit year to 4-digit
+      }
       const date = new Date(year, month, day);
       if (!isNaN(date.getTime())) {
         return date.toISOString().split('T')[0];
@@ -401,18 +282,19 @@ function extractDate(dateValue) {
     }
   }
   
-  // If it's an Excel date number
+  // If it's an Excel date number, convert it
   if (typeof dateValue === 'number') {
+    // Excel date serial number (days since 1900-01-01)
     const excelEpoch = new Date(1899, 11, 30);
     const date = new Date(excelEpoch.getTime() + dateValue * 86400000);
     return date.toISOString().split('T')[0];
   }
   
-  // Try to parse as date string
+  // Try to parse date string in various formats
   if (typeof dateValue === 'string') {
     try {
       const date = new Date(dateValue);
-      if (!isNaN(date.getTime())) && date.getFullYear() > 1900) {
+      if (!isNaN(date.getTime())) {
         return date.toISOString().split('T')[0];
       }
     } catch (e) {
@@ -420,47 +302,6 @@ function extractDate(dateValue) {
     }
   }
   
-  return '';
-}
-
-/**
- * Validate and clean menu data, return statistics
- */
-function validateAndCleanMenu(menuData, foundDays, warnings) {
-  const stats = {
-    daysFound: foundDays.size,
-    daysMissing: 7 - foundDays.size,
-    totalItems: 0,
-    mealCounts: { breakfast: 0, lunch: 0, snacks: 0, dinner: 0 },
-  };
-  
-  // Count items and clean data
-  Object.entries(menuData).forEach(([day, dayData]) => {
-    Object.entries(dayData).forEach(([meal, items]) => {
-      if (meal !== 'date' && Array.isArray(items)) {
-        // Remove duplicates and empty items
-        const uniqueItems = [];
-        const seenNames = new Set();
-        
-        items.forEach(item => {
-          const name = item.name.trim();
-          if (name && name.length > 0 && !seenNames.has(name.toLowerCase())) {
-            seenNames.add(name.toLowerCase());
-            uniqueItems.push({ name });
-          }
-        });
-        
-        menuData[day][meal] = uniqueItems;
-        stats.mealCounts[meal] += uniqueItems.length;
-        stats.totalItems += uniqueItems.length;
-        
-        // Warn if day was found but meal is empty
-        if (foundDays.has(day) && uniqueItems.length === 0) {
-          warnings.push(`${day.charAt(0).toUpperCase() + day.slice(1)} ${meal} has no items.`);
-        }
-      }
-    });
-  });
-  
-  return stats;
-}
+  // Return as-is if we can't parse it
+  return dateValue;
+};
