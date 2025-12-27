@@ -6,6 +6,7 @@ import {
   updateMenuFromExcel,
   addManualMenuItem,
   removeMenuItem,
+  removeAllMenuItems,
 } from '../controllers/menuController.js';
 import { validateMenuItem, handleValidationErrors } from '../utils/validators.js';
 import { authenticateAdmin, optionalStudentAuth } from '../middleware/auth.js';
@@ -19,6 +20,7 @@ router.get('/day/:day', optionalStudentAuth, getDayMenu);
 router.post('/upload-excel', authenticateAdmin, upload.single('file'), updateMenuFromExcel);
 router.post('/add-item', authenticateAdmin, validateMenuItem, handleValidationErrors, addManualMenuItem);
 router.delete('/remove-item', authenticateAdmin, removeMenuItem);
+router.delete('/remove-all', authenticateAdmin, removeAllMenuItems);
 
 export default router;
 

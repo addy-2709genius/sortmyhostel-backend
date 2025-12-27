@@ -256,6 +256,22 @@ export const removeMenuItem = async (req, res, next) => {
   }
 };
 
+// Remove all menu items
+export const removeAllMenuItems = async (req, res, next) => {
+  try {
+    // Delete all menu items
+    const deletedItems = await prisma.menuItem.deleteMany({});
+
+    res.json({ 
+      success: true, 
+      message: 'All menu items removed successfully',
+      deletedCount: deletedItems.count 
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 
 
 
