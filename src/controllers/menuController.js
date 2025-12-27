@@ -87,10 +87,6 @@ export const getAllDaysMenu = async (req, res, next) => {
     next(error);
   }
 };
-  } catch (error) {
-    next(error);
-  }
-};
 
 // Get menu for specific day
 export const getDayMenu = async (req, res, next) => {
