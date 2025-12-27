@@ -4,20 +4,23 @@ import prisma from '../config/database.js';
 export const submitFeedback = async (req, res, next) => {
   try {
     const { foodId, feedbackType } = req.body;
-    const userId = req.headers['x-user-id'] || req.body.userId; // Anonymous user ID
+    const studentId = req.studentId; // Authenticated student ID from middleware
+    const userId = req.headers['x-user-id'] || req.body.userId; // Anonymous user ID (fallback)
 
-    if (!userId) {
-      return res.status(400).json({ error: 'User ID is required' });
+    // Require either student authentication or anonymous user ID
+    if (!studentId && !userId) {
+      return res.status(401).json({ error: 'Authentication required. Please login to give feedback.' });
     }
 
-    // Check if user already voted this type
-    const existingVote = await prisma.feedback.findUnique({
+    // Use studentId if authenticated, otherwise use userId for anonymous
+    const identifier = studentId ? { studentId } : { userId };
+
+    // Check if user already voted this type (using findFirst since we removed unique constraint)
+    const existingVote = await prisma.feedback.findFirst({
       where: {
-        menuItemId_userId_type: {
-          menuItemId: foodId,
-          userId: userId,
-          type: feedbackType,
-        },
+        menuItemId: foodId,
+        type: feedbackType,
+        ...identifier,
       },
     });
 
@@ -30,7 +33,7 @@ export const submitFeedback = async (req, res, next) => {
     await prisma.feedback.deleteMany({
       where: {
         menuItemId: foodId,
-        userId: userId,
+        ...identifier,
         type: oppositeType,
       },
     });
@@ -39,7 +42,7 @@ export const submitFeedback = async (req, res, next) => {
     await prisma.feedback.create({
       data: {
         menuItemId: foodId,
-        userId: userId,
+        ...identifier,
         type: feedbackType,
       },
     });
@@ -54,18 +57,28 @@ export const submitFeedback = async (req, res, next) => {
 export const submitComment = async (req, res, next) => {
   try {
     const { foodId, comment } = req.body;
-    const userId = req.headers['x-user-id'] || req.body.userId;
+    const studentId = req.studentId; // Authenticated student ID from middleware
+    const userId = req.headers['x-user-id'] || req.body.userId; // Anonymous user ID (fallback)
 
-    if (!userId) {
-      return res.status(400).json({ error: 'User ID is required' });
+    // Require either student authentication or anonymous user ID
+    if (!studentId && !userId) {
+      return res.status(401).json({ error: 'Authentication required. Please login to add comments.' });
+    }
+
+    // Use studentId if authenticated, otherwise use userId for anonymous
+    const data = {
+      text: comment.trim(),
+      menuItemId: foodId,
+    };
+    
+    if (studentId) {
+      data.studentId = studentId;
+    } else {
+      data.userId = userId;
     }
 
     const commentRecord = await prisma.comment.create({
-      data: {
-        text: comment.trim(),
-        menuItemId: foodId,
-        userId: userId,
-      },
+      data,
     });
 
     res.json({

@@ -21,11 +21,31 @@ export const optionalAuth = (req, res, next) => {
     const token = req.headers.authorization?.split(' ')[1];
     if (token) {
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      req.adminId = decoded.adminId;
+      if (decoded.type === 'student') {
+        req.studentId = decoded.studentId;
+      } else if (decoded.adminId) {
+        req.adminId = decoded.adminId;
+      }
     }
     next();
   } catch (error) {
     next();
+  }
+};
+
+// Optional student authentication - doesn't require auth but uses it if provided
+export const optionalStudentAuth = (req, res, next) => {
+  try {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (token) {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      if (decoded.type === 'student') {
+        req.studentId = decoded.studentId;
+      }
+    }
+    next();
+  } catch (error) {
+    next(); // Continue even if token is invalid
   }
 };
 

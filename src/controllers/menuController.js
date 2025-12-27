@@ -1,8 +1,8 @@
 import prisma from '../config/database.js';
 import { parseExcelMenu } from '../services/excelParser.js';
 
-// Helper function to format menu item with feedback counts
-const formatMenuItem = async (item) => {
+// Helper function to format menu item with feedback counts and user-specific status
+const formatMenuItem = async (item, studentId = null) => {
   const likes = await prisma.feedback.count({
     where: {
       menuItemId: item.id,
@@ -17,6 +17,20 @@ const formatMenuItem = async (item) => {
     },
   });
 
+  // Check if current user has voted (if authenticated)
+  let userVote = null;
+  if (studentId) {
+    const userFeedback = await prisma.feedback.findFirst({
+      where: {
+        menuItemId: item.id,
+        studentId: studentId,
+      },
+    });
+    if (userFeedback) {
+      userVote = userFeedback.type;
+    }
+  }
+
   const comments = await prisma.comment.findMany({
     where: { menuItemId: item.id },
     orderBy: { createdAt: 'desc' },
@@ -24,6 +38,7 @@ const formatMenuItem = async (item) => {
       id: true,
       text: true,
       createdAt: true,
+      studentId: true,
     },
   });
 
@@ -32,6 +47,7 @@ const formatMenuItem = async (item) => {
     name: item.name,
     likes,
     dislikes,
+    userVote, // 'like', 'dislike', or null
     comments: comments.map(c => ({
       id: c.id,
       text: c.text,
@@ -43,6 +59,7 @@ const formatMenuItem = async (item) => {
 // Get all days menu
 export const getAllDaysMenu = async (req, res, next) => {
   try {
+    const studentId = req.studentId || null; // Get student ID if authenticated
     const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
     const menuData = {};
 
@@ -58,14 +75,18 @@ export const getAllDaysMenu = async (req, res, next) => {
 
       menuData[day] = {
         date: items[0]?.date || null,
-        breakfast: await Promise.all(breakfast.map(formatMenuItem)),
-        lunch: await Promise.all(lunch.map(formatMenuItem)),
-        snacks: await Promise.all(snacks.map(formatMenuItem)),
-        dinner: await Promise.all(dinner.map(formatMenuItem)),
+        breakfast: await Promise.all(breakfast.map(item => formatMenuItem(item, studentId))),
+        lunch: await Promise.all(lunch.map(item => formatMenuItem(item, studentId))),
+        snacks: await Promise.all(snacks.map(item => formatMenuItem(item, studentId))),
+        dinner: await Promise.all(dinner.map(item => formatMenuItem(item, studentId))),
       };
     }
 
     res.json({ data: menuData });
+  } catch (error) {
+    next(error);
+  }
+};
   } catch (error) {
     next(error);
   }
@@ -75,6 +96,7 @@ export const getAllDaysMenu = async (req, res, next) => {
 export const getDayMenu = async (req, res, next) => {
   try {
     const { day } = req.params;
+    const studentId = req.studentId || null; // Get student ID if authenticated
     const items = await prisma.menuItem.findMany({
       where: { day: day.toLowerCase() },
     });
@@ -82,16 +104,16 @@ export const getDayMenu = async (req, res, next) => {
     const menuData = {
       date: items[0]?.date || null,
       breakfast: await Promise.all(
-        items.filter(i => i.meal === 'breakfast').map(formatMenuItem)
+        items.filter(i => i.meal === 'breakfast').map(item => formatMenuItem(item, studentId))
       ),
       lunch: await Promise.all(
-        items.filter(i => i.meal === 'lunch').map(formatMenuItem)
+        items.filter(i => i.meal === 'lunch').map(item => formatMenuItem(item, studentId))
       ),
       snacks: await Promise.all(
-        items.filter(i => i.meal === 'snacks').map(formatMenuItem)
+        items.filter(i => i.meal === 'snacks').map(item => formatMenuItem(item, studentId))
       ),
       dinner: await Promise.all(
-        items.filter(i => i.meal === 'dinner').map(formatMenuItem)
+        items.filter(i => i.meal === 'dinner').map(item => formatMenuItem(item, studentId))
       ),
     };
 

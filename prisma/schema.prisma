@@ -38,13 +38,19 @@ model Feedback {
   id         String   @id @default(auto()) @map("_id") @db.ObjectId
   type       String   // 'like' or 'dislike'
   menuItemId String   @db.ObjectId
-  userId     String   // Anonymous user ID
+  studentId  String?  @db.ObjectId // Authenticated student ID
+  userId     String?  // Anonymous user ID (for backward compatibility)
   createdAt  DateTime @default(now())
   
   menuItem   MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  student    Student? @relation(fields: [studentId], references: [id], onDelete: Cascade)
   
-  @@unique([menuItemId, userId, type]) // One vote per user per item
+  // Unique constraints - one vote per user per item
+  // Note: MongoDB doesn't support partial unique indexes, so we'll handle uniqueness in application logic
+  @@index([menuItemId, studentId, type])
+  @@index([menuItemId, userId, type])
   @@index([menuItemId])
+  @@index([studentId])
   @@index([userId])
   @@map("feedbacks")
 }
@@ -53,13 +59,16 @@ model Comment {
   id         String   @id @default(auto()) @map("_id") @db.ObjectId
   text       String
   menuItemId String   @db.ObjectId
-  userId     String   // Anonymous user ID
+  studentId  String?  @db.ObjectId // Authenticated student ID
+  userId     String?  // Anonymous user ID (for backward compatibility)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   
   menuItem   MenuItem @relation(fields: [menuItemId], references: [id], onDelete: Cascade)
+  student    Student? @relation(fields: [studentId], references: [id], onDelete: Cascade)
   
   @@index([menuItemId])
+  @@index([studentId])
   @@index([userId])
   @@map("comments")
 }
@@ -92,6 +101,9 @@ model Student {
   name      String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  
+  feedbacks Feedback[]
+  comments  Comment[]
   
   @@map("students")
 }
