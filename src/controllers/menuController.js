@@ -218,6 +218,44 @@ export const addManualMenuItem = async (req, res, next) => {
   }
 };
 
+// Remove menu item
+export const removeMenuItem = async (req, res, next) => {
+  try {
+    const { day, meal, foodName } = req.body;
+
+    if (!day || !meal || !foodName) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Day, meal, and food name are required' 
+      });
+    }
+
+    // Find and delete the menu item
+    const deletedItem = await prisma.menuItem.deleteMany({
+      where: {
+        day: day.toLowerCase(),
+        meal: meal.toLowerCase(),
+        name: foodName,
+      },
+    });
+
+    if (deletedItem.count === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Menu item not found' 
+      });
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Menu item removed successfully',
+      deletedCount: deletedItem.count 
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 
 
 
