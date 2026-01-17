@@ -28,16 +28,45 @@ export const getWastageData = async (req, res, next) => {
   }
 };
 
-// Get yesterday's wastage
+// Get yesterday's wastage (or most recent wastage from last 7 days)
 export const getYesterdayWastage = async (req, res, next) => {
   try {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
     yesterday.setHours(0, 0, 0, 0);
+    yesterday.setMinutes(0, 0, 0);
+    yesterday.setSeconds(0, 0);
+    yesterday.setMilliseconds(0);
 
-    const wastage = await prisma.foodWastage.findUnique({
-      where: { date: yesterday },
+    const yesterdayEnd = new Date(yesterday);
+    yesterdayEnd.setHours(23, 59, 59, 999);
+
+    // Try to find wastage for yesterday using date range
+    let wastage = await prisma.foodWastage.findFirst({
+      where: {
+        date: {
+          gte: yesterday,
+          lte: yesterdayEnd,
+        },
+      },
+      orderBy: { date: 'desc' },
     });
+
+    // If not found, get the most recent wastage from last 7 days
+    if (!wastage) {
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      sevenDaysAgo.setHours(0, 0, 0, 0);
+
+      wastage = await prisma.foodWastage.findFirst({
+        where: {
+          date: {
+            gte: sevenDaysAgo,
+          },
+        },
+        orderBy: { date: 'desc' },
+      });
+    }
 
     if (!wastage) {
       return res.json({
@@ -68,19 +97,40 @@ export const submitWastage = async (req, res, next) => {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
     yesterday.setHours(0, 0, 0, 0);
+    yesterday.setMinutes(0, 0, 0);
+    yesterday.setSeconds(0, 0);
+    yesterday.setMilliseconds(0);
 
-    const wastage = await prisma.foodWastage.upsert({
-      where: { date: yesterday },
-      update: {
-        cooked: parseFloat(cooked),
-        wasted: parseFloat(wasted),
-      },
-      create: {
-        date: yesterday,
-        cooked: parseFloat(cooked),
-        wasted: parseFloat(wasted),
+    // First try to find existing record with date range
+    const existingWastage = await prisma.foodWastage.findFirst({
+      where: {
+        date: {
+          gte: new Date(yesterday.getTime()),
+          lt: new Date(yesterday.getTime() + 24 * 60 * 60 * 1000),
+        },
       },
     });
+
+    let wastage;
+    if (existingWastage) {
+      // Update existing record
+      wastage = await prisma.foodWastage.update({
+        where: { id: existingWastage.id },
+        data: {
+          cooked: parseFloat(cooked),
+          wasted: parseFloat(wasted),
+        },
+      });
+    } else {
+      // Create new record
+      wastage = await prisma.foodWastage.create({
+        data: {
+          date: yesterday,
+          cooked: parseFloat(cooked),
+          wasted: parseFloat(wasted),
+        },
+      });
+    }
 
     res.json({ success: true, data: wastage });
   } catch (error) {
